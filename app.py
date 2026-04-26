@@ -1,40 +1,10 @@
 import streamlit as st
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
-from langchain.embeddings.base import Embeddings
-from sklearn.feature_extraction.text import TfidfVectorizer
-import numpy as np
-
-# ============================================================
-# LIGHTWEIGHT EMBEDDINGS - No heavy model download needed!
-# ============================================================
-
-class LightweightEmbeddings(Embeddings):
-    """A simple TF-IDF based embedding that uses almost no memory."""
-    
-    def __init__(self):
-        self.vectorizer = TfidfVectorizer(max_features=512)
-        self._fitted = False
-    
-    def fit(self, texts):
-        self.vectorizer.fit(texts)
-        self._fitted = True
-    
-    def embed_documents(self, texts):
-        if not self._fitted:
-            self.fit(texts)
-        vectors = self.vectorizer.transform(texts).toarray()
-        return vectors.tolist()
-    
-    def embed_query(self, text):
-        if not self._fitted:
-            return [0.0] * 512
-        vector = self.vectorizer.transform([text]).toarray()
-        return vector[0].tolist()
-
-# ============================================================
-# DOCUMENTS
-# ============================================================
 
 DOCUMENTS = [
     """RuPaul's Drag Race is an American reality competition television series. 
@@ -119,10 +89,6 @@ DOCUMENTS = [
     is known for her Russian character and surreal humor.""",
 ]
 
-# ============================================================
-# CUSTOM STYLING
-# ============================================================
-
 def apply_custom_styling():
     st.markdown("""
         <style>
@@ -174,10 +140,6 @@ def apply_custom_styling():
         </style>
     """, unsafe_allow_html=True)
 
-# ============================================================
-# APP SETUP
-# ============================================================
-
 st.set_page_config(
     page_title="Drag Race Knowledge Base",
     page_icon="👑",
@@ -188,32 +150,24 @@ apply_custom_styling()
 
 @st.cache_resource
 def setup_vectorstore(chunk_size, chunk_overlap):
-    """Creates a searchable vector database from our documents."""
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap
     )
     chunks = text_splitter.create_documents(DOCUMENTS)
-    
-    # Extract text from chunks to fit the embeddings
-    texts = [chunk.page_content for chunk in chunks]
-    
-    embeddings = LightweightEmbeddings()
-    embeddings.fit(texts)
-    
+    embeddings = HuggingFaceEmbeddings(
+        model_name="all-MiniLM-L6-v2",
+        model_kwargs={"device": "cpu"},
+        encode_kwargs={"batch_size": 1, "normalize_embeddings": True}
+    )
     vectorstore = Chroma.from_documents(chunks, embeddings)
     return vectorstore, len(chunks)
-
-# ============================================================
-# PAGES
-# ============================================================
 
 def home_page():
     st.title("👑 RuPaul's Drag Race Knowledge Base")
     st.subheader("Your ultimate guide to the world of drag!")
 
     col1, col2 = st.columns(2)
-
     with col1:
         st.markdown("""
         Welcome to the **Drag Race Knowledge Base** — an AI-powered semantic search engine 
@@ -226,7 +180,6 @@ def home_page():
         - 🌍 International versions of the show
         - 💋 Lip syncs, judging panel, and All Stars
         """)
-
     with col2:
         st.markdown("""
         ### How to use this app
@@ -243,16 +196,15 @@ def home_page():
         """)
 
     st.markdown("---")
-    
     col3, col4, col5 = st.columns(3)
     with col3:
         st.metric("📄 Documents", "12")
     with col4:
-        st.metric("🧠 Search Method", "TF-IDF")
+        st.metric("🧠 Embedding Model", "all-MiniLM-L6-v2")
     with col5:
         st.metric("🔍 Search Type", "Semantic")
 
-    st.info("💡 This app uses text search — it finds the most relevant chunks from our knowledge base based on your query!")
+    st.info("💡 This app uses AI-powered semantic search — it understands the *meaning* of your question, not just keywords!")
 
 def search_page():
     st.title("🔍 Search the Drag Race Knowledge Base")
@@ -271,7 +223,7 @@ def search_page():
         help="How much chunks overlap."
     )
 
-    with st.spinner("⏳ Loading knowledge base..."):
+    with st.spinner("⏳ Loading knowledge base... (first load may take 1-2 minutes)"):
         vectorstore, num_chunks = setup_vectorstore(chunk_size, chunk_overlap)
 
     st.success(f"✅ Knowledge base ready! Using chunk_size={chunk_size}, chunk_overlap={chunk_overlap} → {num_chunks} total chunks created.")
@@ -292,7 +244,6 @@ def search_page():
 
 def about_page():
     st.title("ℹ️ About This App")
-
     st.markdown("""
     ## What is this app?
     This is a **Retrieval-Augmented Generation (RAG)** application built as part of a 
@@ -308,39 +259,35 @@ def about_page():
     
     ### 2. ✂️ Chunking
     Each document is split into smaller overlapping pieces called **chunks** using 
-    LangChain's `RecursiveCharacterTextSplitter`. You can experiment with different 
-    chunk sizes directly on the Search page!
+    LangChain's `RecursiveCharacterTextSplitter`.
     
     - **Small chunks (150)** → More precise results, less context per result
     - **Medium chunks (300)** → Balanced precision and context ✅ Default
     - **Large chunks (500)** → More context, but sometimes less precise
     
-    ### 3. 🔍 Search
-    Each chunk is indexed using **TF-IDF**, a lightweight text matching method that 
-    finds the most relevant chunks based on word importance. When you search, your 
-    query is compared against all chunks to find the most similar ones.
-
-    ---
+    ### 3. 🧠 Embeddings
+    Each chunk is converted into a vector (list of numbers) using the 
+    `all-MiniLM-L6-v2` model from HuggingFace. These vectors capture the 
+    *meaning* of the text, enabling true semantic search.
     
+    ### 4. 🗄️ Vector Database
+    All embeddings are stored in **ChromaDB**. When you search, your query is 
+    also converted to an embedding and compared against all chunks to find 
+    the most semantically similar ones.
+
     ## 🛠️ Tech Stack
     | Tool | Purpose |
     |------|---------|
     | Streamlit | Web application framework |
     | LangChain | Text splitting and RAG pipeline |
     | ChromaDB | Vector database |
-    | scikit-learn | TF-IDF embeddings |
+    | HuggingFace | AI embedding model |
     | Render.com | Cloud deployment |
     | GitHub | Version control |
     
-    ---
-    
     ## 👩‍💻 Built by
-    Jana Jovanovic, a student passionate about both AI and RuPaul's Drag Race! 👑
+    A student passionate about both AI and RuPaul's Drag Race! 🏳️‍🌈👑
     """)
-
-# ============================================================
-# NAVIGATION
-# ============================================================
 
 st.sidebar.title("👑 Drag Race RAG")
 st.sidebar.markdown("---")
@@ -354,4 +301,4 @@ elif page == "ℹ️ About":
     about_page()
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("Made with ❤️ and drag")
+st.sidebar.markdown("🏳️‍🌈 Made with ❤️ and drag")
