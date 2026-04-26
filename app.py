@@ -1,10 +1,39 @@
 import streamlit as st
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
+from langchain.embeddings.base import Embeddings
+from sklearn.feature_extraction.text import TfidfVectorizer
+import numpy as np
 
 # ============================================================
-# DOCUMENTS - RuPaul's Drag Race Knowledge Base
+# LIGHTWEIGHT EMBEDDINGS - No heavy model download needed!
+# ============================================================
+
+class LightweightEmbeddings(Embeddings):
+    """A simple TF-IDF based embedding that uses almost no memory."""
+    
+    def __init__(self):
+        self.vectorizer = TfidfVectorizer(max_features=512)
+        self._fitted = False
+    
+    def fit(self, texts):
+        self.vectorizer.fit(texts)
+        self._fitted = True
+    
+    def embed_documents(self, texts):
+        if not self._fitted:
+            self.fit(texts)
+        vectors = self.vectorizer.transform(texts).toarray()
+        return vectors.tolist()
+    
+    def embed_query(self, text):
+        if not self._fitted:
+            return [0.0] * 512
+        vector = self.vectorizer.transform([text]).toarray()
+        return vector[0].tolist()
+
+# ============================================================
+# DOCUMENTS
 # ============================================================
 
 DOCUMENTS = [
@@ -97,27 +126,18 @@ DOCUMENTS = [
 def apply_custom_styling():
     st.markdown("""
         <style>
-        /* Main background */
         .stApp {
             background: linear-gradient(135deg, #1a0033 0%, #2d0057 50%, #1a0033 100%);
         }
-        
-        /* Sidebar */
         [data-testid="stSidebar"] {
             background: linear-gradient(180deg, #2d0057 0%, #4a0080 100%);
         }
-        
-        /* Sidebar text */
         [data-testid="stSidebar"] * {
             color: #ffb3ff !important;
         }
-
-        /* All general text */
         .stApp, .stMarkdown, p, li {
             color: #f0e6ff !important;
         }
-
-        /* Headers */
         h1 {
             color: #ff69b4 !important;
             text-shadow: 0 0 20px #ff69b4;
@@ -126,51 +146,30 @@ def apply_custom_styling():
         h2, h3 {
             color: #da70d6 !important;
         }
-
-        /* Search input box */
         .stTextInput input {
             background-color: #2d0057 !important;
             color: #ffffff !important;
             border: 2px solid #ff69b4 !important;
             border-radius: 10px !important;
         }
-
-        /* Buttons and expanders */
         .streamlit-expanderHeader {
             background: linear-gradient(90deg, #4a0080, #800080) !important;
             color: #ffffff !important;
             border-radius: 8px !important;
         }
-
-        /* Success/info boxes */
         .stAlert {
             background-color: #2d0057 !important;
             border: 1px solid #ff69b4 !important;
             color: #f0e6ff !important;
         }
-
-        /* Radio buttons */
         .stRadio label {
             color: #ffb3ff !important;
         }
-
-        /* Slider */
-        .stSlider {
-            color: #ff69b4 !important;
-        }
-
-        /* Expander content */
         .streamlit-expanderContent {
             background-color: #1a0033 !important;
             border: 1px solid #800080 !important;
             color: #f0e6ff !important;
             border-radius: 0 0 8px 8px !important;
-        }
-
-        /* Selectbox */
-        .stSelectbox select {
-            background-color: #2d0057 !important;
-            color: #ffffff !important;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -195,7 +194,13 @@ def setup_vectorstore(chunk_size, chunk_overlap):
         chunk_overlap=chunk_overlap
     )
     chunks = text_splitter.create_documents(DOCUMENTS)
-    embeddings = HuggingFaceEmbeddings(model_name="paraphrase-MiniLM-L3-v2")
+    
+    # Extract text from chunks to fit the embeddings
+    texts = [chunk.page_content for chunk in chunks]
+    
+    embeddings = LightweightEmbeddings()
+    embeddings.fit(texts)
+    
     vectorstore = Chroma.from_documents(chunks, embeddings)
     return vectorstore, len(chunks)
 
@@ -243,11 +248,11 @@ def home_page():
     with col3:
         st.metric("📄 Documents", "12")
     with col4:
-        st.metric("🧠 Embedding Model", "all-MiniLM-L6-v2")
+        st.metric("🧠 Search Method", "TF-IDF")
     with col5:
         st.metric("🔍 Search Type", "Semantic")
 
-    st.info("💡 This app uses AI-powered semantic search — it understands the *meaning* of your question, not just keywords!")
+    st.info("💡 This app uses text search — it finds the most relevant chunks from our knowledge base based on your query!")
 
 def search_page():
     st.title("🔍 Search the Drag Race Knowledge Base")
@@ -263,7 +268,7 @@ def search_page():
         "Chunk Overlap",
         options=[20, 50, 100],
         index=1,
-        help="How much chunks overlap. More overlap = less chance of cutting off important info."
+        help="How much chunks overlap."
     )
 
     with st.spinner("⏳ Loading knowledge base..."):
@@ -310,20 +315,10 @@ def about_page():
     - **Medium chunks (300)** → Balanced precision and context ✅ Default
     - **Large chunks (500)** → More context, but sometimes less precise
     
-    ### 3. 🧠 Embeddings
-    Each chunk is converted into a list of numbers (called an **embedding**) using 
-    the `all-MiniLM-L6-v2` model from HuggingFace. These numbers capture the 
-    *meaning* of the text, not just the words.
-    
-    ### 4. 🗄️ Vector Database
-    All embeddings are stored in **ChromaDB**, a vector database. When you search, 
-    your query is also converted to an embedding and compared against all chunks 
-    to find the most similar ones.
-    
-    ### 5. 🔍 Semantic Search
-    Unlike keyword search (like Ctrl+F), semantic search understands *meaning*. 
-    For example, searching "who got eliminated first?" will find results about 
-    queens being sent home, even if those exact words aren't in the documents.
+    ### 3. 🔍 Search
+    Each chunk is indexed using **TF-IDF**, a lightweight text matching method that 
+    finds the most relevant chunks based on word importance. When you search, your 
+    query is compared against all chunks to find the most similar ones.
 
     ---
     
@@ -333,14 +328,14 @@ def about_page():
     | Streamlit | Web application framework |
     | LangChain | Text splitting and RAG pipeline |
     | ChromaDB | Vector database |
-    | HuggingFace | Embedding model |
+    | scikit-learn | TF-IDF embeddings |
     | Render.com | Cloud deployment |
     | GitHub | Version control |
     
     ---
     
     ## 👩‍💻 Built by
-    Jana jovanovic, a student passionate about both AI and RuPaul's Drag Race! 👑
+    Jana Jovanovic, a student passionate about both AI and RuPaul's Drag Race! 👑
     """)
 
 # ============================================================
