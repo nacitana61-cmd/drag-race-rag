@@ -1,30 +1,11 @@
 import streamlit as st
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.embeddings.base import Embeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
-from sklearn.feature_extraction.text import TfidfVectorizer
-import numpy as np
 
-class LightweightEmbeddings(Embeddings):
-    def __init__(self):
-        self.vectorizer = TfidfVectorizer(max_features=512)
-        self._fitted = False
-    
-    def fit(self, texts):
-        self.vectorizer.fit(texts)
-        self._fitted = True
-    
-    def embed_documents(self, texts):
-        if not self._fitted:
-            self.fit(texts)
-        vectors = self.vectorizer.transform(texts).toarray()
-        return vectors.tolist()
-    
-    def embed_query(self, text):
-        if not self._fitted:
-            return [0.0] * 512
-        vector = self.vectorizer.transform([text]).toarray()
-        return vector[0].tolist()
+# ============================================================
+# DOCUMENTS - RuPaul's Drag Race Knowledge Base
+# ============================================================
 
 DOCUMENTS = [
     """RuPaul's Drag Race is an American reality competition television series. 
@@ -109,21 +90,34 @@ DOCUMENTS = [
     is known for her Russian character and surreal humor.""",
 ]
 
+# ============================================================
+# CUSTOM STYLING
+# ============================================================
+
 def apply_custom_styling():
     st.markdown("""
         <style>
+        /* Main background */
         .stApp {
             background: linear-gradient(135deg, #1a0033 0%, #2d0057 50%, #1a0033 100%);
         }
+        
+        /* Sidebar */
         [data-testid="stSidebar"] {
             background: linear-gradient(180deg, #2d0057 0%, #4a0080 100%);
         }
+        
+        /* Sidebar text */
         [data-testid="stSidebar"] * {
             color: #ffb3ff !important;
         }
+
+        /* All general text */
         .stApp, .stMarkdown, p, li {
             color: #f0e6ff !important;
         }
+
+        /* Headers */
         h1 {
             color: #ff69b4 !important;
             text-shadow: 0 0 20px #ff69b4;
@@ -132,33 +126,58 @@ def apply_custom_styling():
         h2, h3 {
             color: #da70d6 !important;
         }
+
+        /* Search input box */
         .stTextInput input {
             background-color: #2d0057 !important;
             color: #ffffff !important;
             border: 2px solid #ff69b4 !important;
             border-radius: 10px !important;
         }
+
+        /* Buttons and expanders */
         .streamlit-expanderHeader {
             background: linear-gradient(90deg, #4a0080, #800080) !important;
             color: #ffffff !important;
             border-radius: 8px !important;
         }
+
+        /* Success/info boxes */
         .stAlert {
             background-color: #2d0057 !important;
             border: 1px solid #ff69b4 !important;
             color: #f0e6ff !important;
         }
+
+        /* Radio buttons */
         .stRadio label {
             color: #ffb3ff !important;
         }
+
+        /* Slider */
+        .stSlider {
+            color: #ff69b4 !important;
+        }
+
+        /* Expander content */
         .streamlit-expanderContent {
             background-color: #1a0033 !important;
             border: 1px solid #800080 !important;
             color: #f0e6ff !important;
             border-radius: 0 0 8px 8px !important;
         }
+
+        /* Selectbox */
+        .stSelectbox select {
+            background-color: #2d0057 !important;
+            color: #ffffff !important;
+        }
         </style>
     """, unsafe_allow_html=True)
+
+# ============================================================
+# APP SETUP
+# ============================================================
 
 st.set_page_config(
     page_title="Drag Race Knowledge Base",
@@ -170,22 +189,26 @@ apply_custom_styling()
 
 @st.cache_resource
 def setup_vectorstore(chunk_size, chunk_overlap):
+    """Creates a searchable vector database from our documents."""
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap
     )
     chunks = text_splitter.create_documents(DOCUMENTS)
-    texts = [chunk.page_content for chunk in chunks]
-    embeddings = LightweightEmbeddings()
-    embeddings.fit(texts)
+    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     vectorstore = Chroma.from_documents(chunks, embeddings)
     return vectorstore, len(chunks)
+
+# ============================================================
+# PAGES
+# ============================================================
 
 def home_page():
     st.title("👑 RuPaul's Drag Race Knowledge Base")
     st.subheader("Your ultimate guide to the world of drag!")
 
     col1, col2 = st.columns(2)
+
     with col1:
         st.markdown("""
         Welcome to the **Drag Race Knowledge Base** — an AI-powered semantic search engine 
@@ -198,6 +221,7 @@ def home_page():
         - 🌍 International versions of the show
         - 💋 Lip syncs, judging panel, and All Stars
         """)
+
     with col2:
         st.markdown("""
         ### How to use this app
@@ -214,15 +238,16 @@ def home_page():
         """)
 
     st.markdown("---")
+    
     col3, col4, col5 = st.columns(3)
     with col3:
         st.metric("📄 Documents", "12")
     with col4:
-        st.metric("🧠 Search Method", "TF-IDF")
+        st.metric("🧠 Embedding Model", "all-MiniLM-L6-v2")
     with col5:
         st.metric("🔍 Search Type", "Semantic")
 
-    st.info("💡 This app uses text search to find the most relevant chunks from our knowledge base!")
+    st.info("💡 This app uses AI-powered semantic search — it understands the *meaning* of your question, not just keywords!")
 
 def search_page():
     st.title("🔍 Search the Drag Race Knowledge Base")
@@ -238,7 +263,7 @@ def search_page():
         "Chunk Overlap",
         options=[20, 50, 100],
         index=1,
-        help="How much chunks overlap."
+        help="How much chunks overlap. More overlap = less chance of cutting off important info."
     )
 
     with st.spinner("⏳ Loading knowledge base..."):
@@ -262,6 +287,7 @@ def search_page():
 
 def about_page():
     st.title("ℹ️ About This App")
+
     st.markdown("""
     ## What is this app?
     This is a **Retrieval-Augmented Generation (RAG)** application built as part of a 
@@ -277,29 +303,49 @@ def about_page():
     
     ### 2. ✂️ Chunking
     Each document is split into smaller overlapping pieces called **chunks** using 
-    LangChain's `RecursiveCharacterTextSplitter`.
+    LangChain's `RecursiveCharacterTextSplitter`. You can experiment with different 
+    chunk sizes directly on the Search page!
     
     - **Small chunks (150)** → More precise results, less context per result
     - **Medium chunks (300)** → Balanced precision and context ✅ Default
     - **Large chunks (500)** → More context, but sometimes less precise
     
-    ### 3. 🔍 Search
-    Each chunk is indexed using **TF-IDF**, a lightweight but effective text matching 
-    method that finds the most relevant chunks based on word importance and frequency.
+    ### 3. 🧠 Embeddings
+    Each chunk is converted into a list of numbers (called an **embedding**) using 
+    the `all-MiniLM-L6-v2` model from HuggingFace. These numbers capture the 
+    *meaning* of the text, not just the words.
+    
+    ### 4. 🗄️ Vector Database
+    All embeddings are stored in **ChromaDB**, a vector database. When you search, 
+    your query is also converted to an embedding and compared against all chunks 
+    to find the most similar ones.
+    
+    ### 5. 🔍 Semantic Search
+    Unlike keyword search (like Ctrl+F), semantic search understands *meaning*. 
+    For example, searching "who got eliminated first?" will find results about 
+    queens being sent home, even if those exact words aren't in the documents.
 
+    ---
+    
     ## 🛠️ Tech Stack
     | Tool | Purpose |
     |------|---------|
     | Streamlit | Web application framework |
     | LangChain | Text splitting and RAG pipeline |
     | ChromaDB | Vector database |
-    | scikit-learn | TF-IDF embeddings |
+    | HuggingFace | Embedding model |
     | Render.com | Cloud deployment |
     | GitHub | Version control |
     
+    ---
+    
     ## 👩‍💻 Built by
-    A student passionate about both AI and RuPaul's Drag Race! 🏳️‍🌈👑
+    Jana Jovanovic, a student passionate about both AI and RuPaul's Drag Race!👑
     """)
+
+# ============================================================
+# NAVIGATION
+# ============================================================
 
 st.sidebar.title("👑 Drag Race RAG")
 st.sidebar.markdown("---")
@@ -313,4 +359,4 @@ elif page == "ℹ️ About":
     about_page()
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("🏳️‍🌈 Made with ❤️ and drag")
+st.sidebar.markdown("Made with ❤️ and drag")
