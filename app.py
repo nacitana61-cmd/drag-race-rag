@@ -1,10 +1,30 @@
 import streamlit as st
-import os
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain.embeddings.base import Embeddings
 from langchain_community.vectorstores import Chroma
+from sklearn.feature_extraction.text import TfidfVectorizer
+import numpy as np
+
+class LightweightEmbeddings(Embeddings):
+    def __init__(self):
+        self.vectorizer = TfidfVectorizer(max_features=512)
+        self._fitted = False
+    
+    def fit(self, texts):
+        self.vectorizer.fit(texts)
+        self._fitted = True
+    
+    def embed_documents(self, texts):
+        if not self._fitted:
+            self.fit(texts)
+        vectors = self.vectorizer.transform(texts).toarray()
+        return vectors.tolist()
+    
+    def embed_query(self, text):
+        if not self._fitted:
+            return [0.0] * 512
+        vector = self.vectorizer.transform([text]).toarray()
+        return vector[0].tolist()
 
 DOCUMENTS = [
     """RuPaul's Drag Race is an American reality competition television series. 
@@ -155,11 +175,9 @@ def setup_vectorstore(chunk_size, chunk_overlap):
         chunk_overlap=chunk_overlap
     )
     chunks = text_splitter.create_documents(DOCUMENTS)
-    embeddings = HuggingFaceEmbeddings(
-        model_name="all-MiniLM-L6-v2",
-        model_kwargs={"device": "cpu"},
-        encode_kwargs={"batch_size": 1, "normalize_embeddings": True}
-    )
+    texts = [chunk.page_content for chunk in chunks]
+    embeddings = LightweightEmbeddings()
+    embeddings.fit(texts)
     vectorstore = Chroma.from_documents(chunks, embeddings)
     return vectorstore, len(chunks)
 
@@ -200,11 +218,11 @@ def home_page():
     with col3:
         st.metric("📄 Documents", "12")
     with col4:
-        st.metric("🧠 Embedding Model", "all-MiniLM-L6-v2")
+        st.metric("🧠 Search Method", "TF-IDF")
     with col5:
         st.metric("🔍 Search Type", "Semantic")
 
-    st.info("💡 This app uses AI-powered semantic search — it understands the *meaning* of your question, not just keywords!")
+    st.info("💡 This app uses text search to find the most relevant chunks from our knowledge base!")
 
 def search_page():
     st.title("🔍 Search the Drag Race Knowledge Base")
@@ -223,7 +241,7 @@ def search_page():
         help="How much chunks overlap."
     )
 
-    with st.spinner("⏳ Loading knowledge base... (first load may take 1-2 minutes)"):
+    with st.spinner("⏳ Loading knowledge base..."):
         vectorstore, num_chunks = setup_vectorstore(chunk_size, chunk_overlap)
 
     st.success(f"✅ Knowledge base ready! Using chunk_size={chunk_size}, chunk_overlap={chunk_overlap} → {num_chunks} total chunks created.")
@@ -265,15 +283,9 @@ def about_page():
     - **Medium chunks (300)** → Balanced precision and context ✅ Default
     - **Large chunks (500)** → More context, but sometimes less precise
     
-    ### 3. 🧠 Embeddings
-    Each chunk is converted into a vector (list of numbers) using the 
-    `all-MiniLM-L6-v2` model from HuggingFace. These vectors capture the 
-    *meaning* of the text, enabling true semantic search.
-    
-    ### 4. 🗄️ Vector Database
-    All embeddings are stored in **ChromaDB**. When you search, your query is 
-    also converted to an embedding and compared against all chunks to find 
-    the most semantically similar ones.
+    ### 3. 🔍 Search
+    Each chunk is indexed using **TF-IDF**, a lightweight but effective text matching 
+    method that finds the most relevant chunks based on word importance and frequency.
 
     ## 🛠️ Tech Stack
     | Tool | Purpose |
@@ -281,7 +293,7 @@ def about_page():
     | Streamlit | Web application framework |
     | LangChain | Text splitting and RAG pipeline |
     | ChromaDB | Vector database |
-    | HuggingFace | AI embedding model |
+    | scikit-learn | TF-IDF embeddings |
     | Render.com | Cloud deployment |
     | GitHub | Version control |
     
