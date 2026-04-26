@@ -195,7 +195,7 @@ def setup_vectorstore(chunk_size, chunk_overlap):
         chunk_overlap=chunk_overlap
     )
     chunks = text_splitter.create_documents(DOCUMENTS)
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    embeddings = HuggingFaceEmbeddings(model_name="paraphrase-MiniLM-L3-v2")
     vectorstore = Chroma.from_documents(chunks, embeddings)
     return vectorstore, len(chunks)
 
